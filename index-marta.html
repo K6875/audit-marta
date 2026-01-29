@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit Flow-IA - Marta</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    input[type="range"]::-webkit-slider-thumb { 
+      -webkit-appearance: none; 
+      width: 20px; height: 20px; 
+      background: linear-gradient(135deg, #8b5cf6, #10b981); 
+      border-radius: 50%; 
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(139, 92, 246, 0.4);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px; height: 20px;
+      background: linear-gradient(135deg, #8b5cf6, #10b981);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+    .fade-in { animation: fadeIn 0.3s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .bar-animate { animation: barGrow 0.5s ease-out; }
+    @keyframes barGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    const TAGS = {
+      robot: { emoji: '🤖', label: 'Robot', sublabel: 'Automatisable', color: 'emerald', gradient: 'from-emerald-500 to-teal-600' },
+      brain: { emoji: '🧠', label: 'Cerveau', sublabel: "Besoin d'IA", color: 'violet', gradient: 'from-violet-500 to-purple-600' },
+      human: { emoji: '🤝', label: 'Humain', sublabel: 'Valeur ajoutée', color: 'amber', gradient: 'from-amber-500 to-orange-600' }
+    };
+
+    const FREQUENCIES = [
+      { value: 'daily', label: 'Quotidien', multiplier: 22 },
+      { value: 'weekly', label: 'Hebdomadaire', multiplier: 4 },
+      { value: 'monthly', label: 'Mensuel', multiplier: 1 }
+    ];
+
+    const INITIAL_TASK = {
+      name: '', trigger: '', action: '', reflection: '', destination: '',
+      frequency: 'daily', duration: 15, tag: 'robot', painScore: 3
+    };
+
+    // Simple Pie Chart Component
+    const SimplePieChart = ({ data, darkMode }) => {
+      const total = data.reduce((acc, d) => acc + d.value, 0);
+      if (total === 0) return <div className={`h-64 flex items-center justify-center ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Aucune donnée</div>;
+      
+      let currentAngle = 0;
+      const segments = data.filter(d => d.value > 0).map(d => {
+        const angle = (d.value / total) * 360;
+        const startAngle = currentAngle;
+        currentAngle += angle;
+        return { ...d, startAngle, angle };
+      });
+
+      const getCoordinatesForPercent = (percent) => {
+        const x = Math.cos(2 * Math.PI * percent);
+        const y = Math.sin(2 * Math.PI * percent);
+        return [x, y];
+      };
+
+      return (
+        <div className="h-64 flex flex-col items-center justify-center">
+          <svg viewBox="-1.2 -1.2 2.4 2.4" className="w-48 h-48" style={{ transform: 'rotate(-90deg)' }}>
+            {segments.map((segment, i) => {
+              const startPercent = segment.startAngle / 360;
+              const endPercent = (segment.startAngle + segment.angle) / 360;
+              const [startX, startY] = getCoordinatesForPercent(startPercent);
+              const [endX, endY] = getCoordinatesForPercent(endPercent);
+              const largeArcFlag = segment.angle > 180 ? 1 : 0;
+              const pathData = [
+                `M ${startX} ${startY}`,
+                `A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY}`,
+                `L 0 0`,
+              ].join(' ');
+              return <path key={i} d={pathData} fill={segment.color} className="opacity-90 hover:opacity-100 transition-opacity" />;
+            })}
+            <circle cx="0" cy="0" r="0.6" fill={darkMode ? '#0f172a' : '#f8fafc'} />
+          </svg>
+          <div className="flex gap-4 mt-4 flex-wrap justify-center">
+            {segments.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />
+                <span className={darkMode ? 'text-slate-300' : 'text-slate-600'}>{s.name}: {s.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    // Simple Bar Chart Component
+    const SimpleBarChart = ({ data, darkMode }) => {
+      const maxCount = Math.max(...data.map(d => d.count), 1);
+      if (maxCount === 0) return <div className={`h-64 flex items-center justify-center ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Aucune donnée</div>;
+      
+      return (
+        <div className="h-64 flex items-end justify-around gap-2 px-4 pt-4 pb-8">
+          {data.map((d, i) => (
+            <div key={i} className="flex flex-col items-center gap-2 flex-1">
+              <div className="w-full flex flex-col items-center justify-end h-44">
+                <span className={`text-xs mb-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{d.count}</span>
+                <div 
+                  className="w-full max-w-12 bg-gradient-to-t from-violet-600 to-emerald-500 rounded-t-lg bar-animate"
+                  style={{ height: `${(d.count / maxCount) * 100}%`, minHeight: d.count > 0 ? '8px' : '0', transformOrigin: 'bottom' }}
+                />
+              </div>
+              <span className={`text-sm font-medium ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{d.score}</span>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    function App() {
+      const [darkMode, setDarkMode] = useState(() => {
+        const saved = localStorage.getItem('auditflow-marta-darkmode');
+        return saved ? JSON.parse(saved) : true;
+      });
+      
+      const [tasks, setTasks] = useState(() => {
+        const saved = localStorage.getItem('auditflow-marta-tasks');
+        return saved ? JSON.parse(saved) : [];
+      });
+      
+      const [currentTask, setCurrentTask] = useState(INITIAL_TASK);
+      const [editingId, setEditingId] = useState(null);
+      const [activeTab, setActiveTab] = useState('journal');
+      const [showForm, setShowForm] = useState(false);
+
+      useEffect(() => {
+        localStorage.setItem('auditflow-marta-tasks', JSON.stringify(tasks));
+      }, [tasks]);
+
+      useEffect(() => {
+        localStorage.setItem('auditflow-marta-darkmode', JSON.stringify(darkMode));
+      }, [darkMode]);
+
+      const stats = useMemo(() => {
+        const totalMinutesPerMonth = tasks.reduce((acc, task) => {
+          const freq = FREQUENCIES.find(f => f.value === task.frequency);
+          return acc + (task.duration * (freq?.multiplier || 1));
+        }, 0);
+
+        const automatizableMinutes = tasks
+          .filter(t => t.tag === 'robot' || t.tag === 'brain')
+          .reduce((acc, task) => {
+            const freq = FREQUENCIES.find(f => f.value === task.frequency);
+            return acc + (task.duration * (freq?.multiplier || 1));
+          }, 0);
+
+        const tagDistribution = Object.keys(TAGS).map(tag => ({
+          name: TAGS[tag].label,
+          value: tasks.filter(t => t.tag === tag).length,
+          color: tag === 'robot' ? '#10b981' : tag === 'brain' ? '#8b5cf6' : '#f59e0b'
+        }));
+
+        const priorityTasks = [...tasks]
+          .filter(t => t.tag !== 'human')
+          .sort((a, b) => {
+            const scoreA = a.painScore * (FREQUENCIES.find(f => f.value === a.frequency)?.multiplier || 1) * a.duration;
+            const scoreB = b.painScore * (FREQUENCIES.find(f => f.value === b.frequency)?.multiplier || 1) * b.duration;
+            return scoreB - scoreA;
+          })
+          .slice(0, 5);
+
+        const painDistribution = [1, 2, 3, 4, 5].map(score => ({
+          score: `${score}`,
+          count: tasks.filter(t => t.painScore === score).length
+        }));
+
+        return {
+          totalMinutesPerMonth,
+          totalHoursPerMonth: (totalMinutesPerMonth / 60).toFixed(1),
+          automatizableMinutes,
+          automatizableHours: (automatizableMinutes / 60).toFixed(1),
+          automationPotential: totalMinutesPerMonth > 0 ? ((automatizableMinutes / totalMinutesPerMonth) * 100).toFixed(0) : 0,
+          tagDistribution,
+          priorityTasks,
+          painDistribution,
+          taskCount: tasks.length
+        };
+      }, [tasks]);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!currentTask.name.trim()) return;
+
+        if (editingId) {
+          setTasks(tasks.map(t => t.id === editingId ? { ...currentTask, id: editingId } : t));
+          setEditingId(null);
+        } else {
+          setTasks([...tasks, { ...currentTask, id: Date.now() }]);
+        }
+        setCurrentTask(INITIAL_TASK);
+        setShowForm(false);
+      };
+
+      const handleEdit = (task) => {
+        setCurrentTask(task);
+        setEditingId(task.id);
+        setShowForm(true);
+      };
+
+      const handleDelete = (id) => {
+        setTasks(tasks.filter(t => t.id !== id));
+      };
+
+      const exportJSON = () => {
+        const data = JSON.stringify(tasks, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit-flow-ia-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+      };
+
+      const exportCSV = () => {
+        const headers = ['Nom', 'Trigger', 'Action', 'Réflexion', 'Destination', 'Fréquence', 'Durée (min)', 'Tag', 'Pénibilité'];
+        const rows = tasks.map(t => [
+          t.name, t.trigger, t.action, t.reflection, t.destination,
+          FREQUENCIES.find(f => f.value === t.frequency)?.label,
+          t.duration, TAGS[t.tag]?.label, t.painScore
+        ]);
+        const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit-flow-ia-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+      };
+
+      const baseClasses = darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900';
+
+      return (
+        <div className={`min-h-screen ${baseClasses} transition-colors duration-500`}>
+          <div className="fixed inset-0 overflow-hidden pointer-events-none">
+            <div className={`absolute -top-1/2 -right-1/2 w-full h-full rounded-full blur-3xl opacity-20 ${darkMode ? 'bg-gradient-to-br from-violet-600 to-emerald-600' : 'bg-gradient-to-br from-violet-300 to-emerald-300'}`} />
+          </div>
+
+          <header className={`relative z-10 border-b ${darkMode ? 'border-slate-800/50 bg-slate-900/80' : 'border-slate-200/50 bg-white/80'} backdrop-blur-xl`}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16 sm:h-20">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                      <span className="text-xl">⚡</span>
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full animate-pulse" />
+                  </div>
+                  <div>
+                    <h1 className="text-lg sm:text-xl font-bold tracking-tight">Audit <span className="bg-gradient-to-r from-violet-400 to-emerald-400 bg-clip-text text-transparent">Flow-IA</span></h1>
+                    <p className={`text-xs ${darkMode ? 'text-slate-500' : 'text-slate-400'} hidden sm:block`}>Espace de Marta</p>
+                  </div>
+                </div>
+                <button onClick={() => setDarkMode(!darkMode)} className={`p-2.5 rounded-xl transition-all duration-300 ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-amber-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
+                  {darkMode ? '☀️' : '🌙'}
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <nav className={`relative z-10 border-b ${darkMode ? 'border-slate-800/50 bg-slate-900/50' : 'border-slate-200/50 bg-white/50'} backdrop-blur-sm`}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex gap-1 sm:gap-2 py-2 overflow-x-auto">
+                {[{ id: 'journal', label: 'Journal', icon: '📋' }, { id: 'dashboard', label: 'Synthèse', icon: '📊' }, { id: 'export', label: 'Export', icon: '💾' }].map(tab => (
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 whitespace-nowrap ${activeTab === tab.id ? 'bg-gradient-to-r from-violet-500 to-emerald-500 text-white shadow-lg shadow-violet-500/25' : darkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}>
+                    <span>{tab.icon}</span><span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </nav>
+
+          <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+            {activeTab === 'journal' && (
+              <div className="space-y-6 fade-in">
+                {!showForm && (
+                  <button onClick={() => { setShowForm(true); setEditingId(null); setCurrentTask(INITIAL_TASK); }} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-violet-500 to-emerald-500 text-white font-semibold shadow-xl shadow-violet-500/25 hover:shadow-violet-500/40 transition-all duration-300 hover:scale-[1.02]">
+                    <span className="text-xl">+</span><span>Ajouter une tâche</span>
+                  </button>
+                )}
+
+                {showForm && (
+                  <div className={`rounded-3xl p-6 sm:p-8 ${darkMode ? 'bg-slate-900/80' : 'bg-white/80'} backdrop-blur-xl border ${darkMode ? 'border-slate-800' : 'border-slate-200'} shadow-2xl fade-in`}>
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-xl font-bold flex items-center gap-2">✨ {editingId ? 'Modifier la tâche' : 'Nouvelle tâche'}</h2>
+                      <button onClick={() => { setShowForm(false); setEditingId(null); setCurrentTask(INITIAL_TASK); }} className={`p-2 rounded-xl ${darkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'} transition-colors text-xl`}>✕</button>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Nom de la tâche</label>
+                        <input type="text" value={currentTask.name} onChange={(e) => setCurrentTask({ ...currentTask, name: e.target.value })} placeholder="Ex: Traitement des factures fournisseurs" className={`w-full px-4 py-3 rounded-xl border ${darkMode ? 'bg-slate-800/50 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-violet-500' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:border-violet-500'} focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-all`} required />
+                      </div>
+
+                      <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/30' : 'bg-slate-100/50'}`}>
+                        <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">🎯 Méthode T.A.R.D</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {[{ key: 'trigger', label: 'Trigger', placeholder: "Qu'est-ce qui déclenche cette tâche ?", icon: '⚡' }, { key: 'action', label: 'Action', placeholder: 'Quelle action effectuez-vous ?', icon: '🎯' }, { key: 'reflection', label: 'Réflexion', placeholder: 'Quelle réflexion/décision est nécessaire ?', icon: '💭' }, { key: 'destination', label: 'Destination', placeholder: 'Quel est le résultat final ?', icon: '📍' }].map(field => (
+                            <div key={field.key}>
+                              <label className={`block text-xs font-medium mb-1.5 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>{field.icon} {field.label}</label>
+                              <input type="text" value={currentTask[field.key]} onChange={(e) => setCurrentTask({ ...currentTask, [field.key]: e.target.value })} placeholder={field.placeholder} className={`w-full px-3 py-2.5 rounded-lg border text-sm ${darkMode ? 'bg-slate-900/50 border-slate-700 text-slate-100 placeholder-slate-600 focus:border-violet-500' : 'bg-white border-slate-200 text-slate-900 placeholder-slate-400 focus:border-violet-500'} focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-all`} />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>📅 Fréquence</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {FREQUENCIES.map(freq => (
+                              <button key={freq.value} type="button" onClick={() => setCurrentTask({ ...currentTask, frequency: freq.value })} className={`px-3 py-2 rounded-xl text-sm font-medium transition-all ${currentTask.frequency === freq.value ? 'bg-gradient-to-r from-violet-500 to-emerald-500 text-white shadow-lg' : darkMode ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{freq.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className={`block text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>⏱️ Temps passé</label>
+                          <div className="flex items-center gap-3">
+                            <input type="range" min="5" max="180" step="5" value={currentTask.duration} onChange={(e) => setCurrentTask({ ...currentTask, duration: parseInt(e.target.value) })} className="flex-1 h-2 rounded-full appearance-none cursor-pointer" style={{ background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(currentTask.duration - 5) / 175 * 100}%, ${darkMode ? '#1e293b' : '#e2e8f0'} ${(currentTask.duration - 5) / 175 * 100}%, ${darkMode ? '#1e293b' : '#e2e8f0'} 100%)` }} />
+                            <span className={`w-16 text-center px-3 py-2 rounded-lg font-mono text-sm ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>{currentTask.duration} min</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className={`block text-sm font-medium mb-3 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Classification de la tâche</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {Object.entries(TAGS).map(([key, tag]) => (
+                            <button key={key} type="button" onClick={() => setCurrentTask({ ...currentTask, tag: key })} className={`relative p-4 rounded-2xl border-2 transition-all duration-300 ${currentTask.tag === key ? `border-transparent bg-gradient-to-br ${tag.gradient} text-white shadow-lg` : darkMode ? 'border-slate-700 bg-slate-800/50 hover:border-slate-600' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}>
+                              <div className="text-3xl mb-2">{tag.emoji}</div>
+                              <div className="font-semibold">{tag.label}</div>
+                              <div className={`text-xs ${currentTask.tag === key ? 'text-white/80' : darkMode ? 'text-slate-500' : 'text-slate-400'}`}>{tag.sublabel}</div>
+                              {currentTask.tag === key && <span className="absolute top-2 right-2">✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className={`block text-sm font-medium mb-3 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Score de pénibilité</label>
+                        <div className="flex items-center gap-2">
+                          {[1, 2, 3, 4, 5].map(score => (
+                            <button key={score} type="button" onClick={() => setCurrentTask({ ...currentTask, painScore: score })} className={`flex-1 py-3 rounded-xl font-bold transition-all duration-300 ${currentTask.painScore >= score ? score <= 2 ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25' : score === 3 ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' : 'bg-rose-500 text-white shadow-lg shadow-rose-500/25' : darkMode ? 'bg-slate-800 text-slate-500' : 'bg-slate-100 text-slate-400'}`}>{score}</button>
+                          ))}
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs">
+                          <span className={darkMode ? 'text-slate-500' : 'text-slate-400'}>Facile</span>
+                          <span className={darkMode ? 'text-slate-500' : 'text-slate-400'}>Très pénible</span>
+                        </div>
+                      </div>
+
+                      <button type="submit" className="w-full py-4 rounded-2xl bg-gradient-to-r from-violet-500 to-emerald-500 text-white font-semibold shadow-xl shadow-violet-500/25 hover:shadow-violet-500/40 transition-all duration-300 hover:scale-[1.01] flex items-center justify-center gap-2">💾 {editingId ? 'Enregistrer les modifications' : 'Ajouter cette tâche'}</button>
+                    </form>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {tasks.length === 0 ? (
+                    <div className={`text-center py-16 rounded-3xl ${darkMode ? 'bg-slate-900/50' : 'bg-white/50'} border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <div className="text-6xl mb-4">📋</div>
+                      <h3 className={`text-lg font-semibold mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Aucune tâche documentée</h3>
+                      <p className={darkMode ? 'text-slate-500' : 'text-slate-400'}>Commencez par ajouter vos tâches quotidiennes</p>
+                    </div>
+                  ) : (
+                    tasks.map((task) => {
+                      const tag = TAGS[task.tag];
+                      const freq = FREQUENCIES.find(f => f.value === task.frequency);
+                      const monthlyMinutes = task.duration * (freq?.multiplier || 1);
+                      return (
+                        <div key={task.id} className={`group rounded-2xl p-5 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'} hover:shadow-xl transition-all duration-300 fade-in`}>
+                          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                            <div className={`flex-shrink-0 w-14 h-14 rounded-2xl bg-gradient-to-br ${tag.gradient} flex items-center justify-center text-2xl shadow-lg`}>{tag.emoji}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <h3 className="font-semibold text-lg truncate">{task.name}</h3>
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => handleEdit(task)} className={`p-2 rounded-lg ${darkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'} transition-colors`}>✏️</button>
+                                  <button onClick={() => handleDelete(task.id)} className={`p-2 rounded-lg ${darkMode ? 'hover:bg-rose-500/10' : 'hover:bg-rose-50'} transition-colors`}>🗑️</button>
+                                </div>
+                              </div>
+                              {(task.trigger || task.action) && <div className={`mt-2 text-xs ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>{task.trigger && <span>⚡ {task.trigger}</span>}{task.action && <span> → 🎯 {task.action}</span>}</div>}
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>📅 {freq?.label}</span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>⏱️ {task.duration} min</span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r ${tag.gradient} text-white`}>{tag.label}</span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${task.painScore <= 2 ? 'bg-emerald-500/20 text-emerald-400' : task.painScore === 3 ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'}`}>Pénibilité: {task.painScore}/5</span>
+                                <span className={`ml-auto text-xs font-semibold ${darkMode ? 'text-violet-400' : 'text-violet-600'}`}>~{(monthlyMinutes / 60).toFixed(1)}h/mois</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'dashboard' && (
+              <div className="space-y-6 fade-in">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[{ label: 'Tâches', value: stats.taskCount, icon: '📋', gradient: 'from-blue-500 to-cyan-500' }, { label: 'Heures/mois', value: `${stats.totalHoursPerMonth}h`, icon: '⏱️', gradient: 'from-violet-500 to-purple-500' }, { label: 'Automatisables', value: `${stats.automatizableHours}h`, icon: '🤖', gradient: 'from-emerald-500 to-teal-500' }, { label: 'Potentiel', value: `${stats.automationPotential}%`, icon: '📈', gradient: 'from-amber-500 to-orange-500' }].map((card, i) => (
+                    <div key={i} className={`relative overflow-hidden rounded-2xl p-4 sm:p-5 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                      <div className={`absolute top-0 right-0 w-16 h-16 bg-gradient-to-br ${card.gradient} opacity-10 rounded-bl-full`} />
+                      <div className="text-2xl mb-2">{card.icon}</div>
+                      <div className="text-2xl sm:text-3xl font-bold mb-1">{card.value}</div>
+                      <div className={`text-xs sm:text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{card.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className={`rounded-2xl p-6 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">🥧 Répartition par type</h3>
+                    <SimplePieChart data={stats.tagDistribution} darkMode={darkMode} />
+                  </div>
+                  <div className={`rounded-2xl p-6 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                    <h3 className="font-semibold mb-4 flex items-center gap-2">📊 Distribution pénibilité</h3>
+                    <SimpleBarChart data={stats.painDistribution} darkMode={darkMode} />
+                  </div>
+                </div>
+
+                <div className={`rounded-2xl p-6 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">🏆 Top 5 - Tâches prioritaires</h3>
+                  {stats.priorityTasks.length > 0 ? (
+                    <div className="space-y-3">
+                      {stats.priorityTasks.map((task, index) => {
+                        const tag = TAGS[task.tag];
+                        const freq = FREQUENCIES.find(f => f.value === task.frequency);
+                        const monthlyMinutes = task.duration * (freq?.multiplier || 1);
+                        const priorityScore = task.painScore * monthlyMinutes;
+                        return (
+                          <div key={task.id} className={`flex items-center gap-4 p-4 rounded-xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${index === 0 ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white' : index === 1 ? 'bg-gradient-to-br from-slate-300 to-slate-400 text-slate-800' : index === 2 ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white' : darkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>{index + 1}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{task.name}</div>
+                              <div className={`text-xs ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>{tag.emoji} {tag.label} · {(monthlyMinutes / 60).toFixed(1)}h/mois · Pénibilité {task.painScore}/5</div>
+                            </div>
+                            <div className="text-right"><div className="text-sm font-semibold text-emerald-400">Score: {priorityScore}</div></div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : <div className={`text-center py-8 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>Aucune tâche automatisable</div>}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'export' && (
+              <div className="max-w-2xl mx-auto space-y-6 fade-in">
+                <div className={`rounded-3xl p-8 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <div className="text-center mb-8">
+                    <div className="inline-flex p-4 rounded-2xl bg-gradient-to-br from-violet-500 to-emerald-500 shadow-xl shadow-violet-500/25 mb-4"><span className="text-3xl">💾</span></div>
+                    <h2 className="text-2xl font-bold mb-2">Exporter vos données</h2>
+                    <p className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Téléchargez vos tâches pour analyse</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button onClick={exportJSON} disabled={tasks.length === 0} className={`group relative overflow-hidden p-6 rounded-2xl border-2 transition-all duration-300 ${tasks.length > 0 ? `border-violet-500/50 hover:border-violet-500 ${darkMode ? 'bg-violet-500/10' : 'bg-violet-50'}` : `border-slate-700 ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100'} opacity-50 cursor-not-allowed`}`}>
+                      <div className="text-4xl mb-4">📄</div>
+                      <div className="font-semibold text-lg mb-1">Format JSON</div>
+                      <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Idéal pour n8n</div>
+                    </button>
+                    <button onClick={exportCSV} disabled={tasks.length === 0} className={`group relative overflow-hidden p-6 rounded-2xl border-2 transition-all duration-300 ${tasks.length > 0 ? `border-emerald-500/50 hover:border-emerald-500 ${darkMode ? 'bg-emerald-500/10' : 'bg-emerald-50'}` : `border-slate-700 ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100'} opacity-50 cursor-not-allowed`}`}>
+                      <div className="text-4xl mb-4">📊</div>
+                      <div className="font-semibold text-lg mb-1">Format CSV</div>
+                      <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Pour Excel/Sheets</div>
+                    </button>
+                  </div>
+                  {tasks.length === 0 && <div className={`mt-6 p-4 rounded-xl ${darkMode ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-amber-50 border border-amber-200'}`}><p className={`text-sm text-center ${darkMode ? 'text-amber-400' : 'text-amber-700'}`}>⚠️ Ajoutez des tâches avant d'exporter</p></div>}
+                  {tasks.length > 0 && <div className={`mt-6 p-4 rounded-xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100'}`}><div className="flex items-center justify-between text-sm"><span className={darkMode ? 'text-slate-400' : 'text-slate-500'}>Prêt à exporter</span><span className="font-semibold">{tasks.length} tâche{tasks.length > 1 ? 's' : ''}</span></div></div>}
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Guide Section */}
+          <section className={`relative z-10 mt-12 mx-4 sm:mx-6 lg:mx-8 max-w-7xl xl:mx-auto`}>
+            <div className={`rounded-3xl p-6 sm:p-8 lg:p-10 ${darkMode ? 'bg-slate-900/60' : 'bg-white/60'} backdrop-blur-sm border ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+              
+              {/* Header */}
+              <div className="text-center mb-8">
+                <div className="inline-flex p-3 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-xl shadow-amber-500/25 mb-4">
+                  <span className="text-3xl">🕵️</span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-bold mb-3">Guide d'Auto-Analyse : Préparez votre Révolution IA</h2>
+                <p className={`max-w-3xl mx-auto ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Ce guide n'est pas une corvée administrative, c'est la <strong className={darkMode ? 'text-violet-400' : 'text-violet-600'}>cartographie de votre future liberté</strong>. 
+                  Pour que je puisse construire des agents IA et des workflows qui vous font gagner des heures, nous devons ensemble isoler l'ADN de votre travail.
+                </p>
+              </div>
+
+              {/* Grid of sections */}
+              <div className="space-y-6">
+                
+                {/* Section 1 */}
+                <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg">1</div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-2">La Règle d'Or : "Si vous le faites deux fois, notez-le"</h3>
+                      <p className={`mb-3 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Pendant les <strong>deux prochaines semaines</strong>, votre objectif n'est pas de changer vos habitudes, mais de les <em>observer</em>. 
+                        Gardez un carnet (ou un Notion/Excel) ouvert. Dès que vous effectuez une action sur votre ordinateur, demandez-vous :
+                      </p>
+                      <ul className={`space-y-2 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                        <li className="flex items-start gap-2"><span className="text-violet-400">•</span> Est-ce que j'ai déjà fait ça hier ou la semaine dernière ?</li>
+                        <li className="flex items-start gap-2"><span className="text-violet-400">•</span> Est-ce que je pourrais expliquer cette tâche à un stagiaire en 5 minutes ?</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2 - T.A.R.D. */}
+                <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-bold shadow-lg">2</div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-2">Décomposer la Tâche : La Méthode T.A.R.D.</h3>
+                      <p className={`mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Pour chaque action répétitive identifiée, essayez de remplir ces quatre colonnes :
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className={darkMode ? 'text-slate-300' : 'text-slate-700'}>
+                              <th className="text-left py-2 px-3 font-semibold">Élément</th>
+                              <th className="text-left py-2 px-3 font-semibold">Description</th>
+                              <th className="text-left py-2 px-3 font-semibold">Exemple concret</th>
+                            </tr>
+                          </thead>
+                          <tbody className={darkMode ? 'text-slate-400' : 'text-slate-600'}>
+                            <tr className={darkMode ? 'border-t border-slate-700' : 'border-t border-slate-200'}>
+                              <td className="py-2 px-3"><span className="font-medium text-amber-400">⚡ Trigger</span></td>
+                              <td className="py-2 px-3">Qu'est-ce qui lance l'action ?</td>
+                              <td className="py-2 px-3 italic">Réception d'un email de facture</td>
+                            </tr>
+                            <tr className={darkMode ? 'border-t border-slate-700' : 'border-t border-slate-200'}>
+                              <td className="py-2 px-3"><span className="font-medium text-emerald-400">🎯 Action</span></td>
+                              <td className="py-2 px-3">Que faites-vous concrètement ?</td>
+                              <td className="py-2 px-3 italic">Télécharger le PDF et le renommer</td>
+                            </tr>
+                            <tr className={darkMode ? 'border-t border-slate-700' : 'border-t border-slate-200'}>
+                              <td className="py-2 px-3"><span className="font-medium text-violet-400">💭 Réflexion</span></td>
+                              <td className="py-2 px-3">Devez-vous réfléchir/choisir ?</td>
+                              <td className="py-2 px-3 italic">Vérifier si le montant correspond au devis</td>
+                            </tr>
+                            <tr className={darkMode ? 'border-t border-slate-700' : 'border-t border-slate-200'}>
+                              <td className="py-2 px-3"><span className="font-medium text-rose-400">📍 Destination</span></td>
+                              <td className="py-2 px-3">Où va l'information à la fin ?</td>
+                              <td className="py-2 px-3 italic">Déposé dans le dossier Google Drive 'Compta'</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3 - Labels */}
+                <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white font-bold shadow-lg">3</div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-2">Labelliser vos Tâches (Le Code Couleur)</h3>
+                      <p className={`mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Une fois votre liste de tâches établie, annotez-les selon leur potentiel d'automatisation. Cela nous aidera à prioriser mon intervention :
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className={`p-4 rounded-xl ${darkMode ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-emerald-50 border border-emerald-200'}`}>
+                          <div className="text-2xl mb-2">🤖</div>
+                          <div className="font-semibold text-emerald-400 mb-1">Tâches "Robot"</div>
+                          <div className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>100% Automatisable : copier-coller, transfert de données, renommage de fichiers</div>
+                        </div>
+                        <div className={`p-4 rounded-xl ${darkMode ? 'bg-violet-500/10 border border-violet-500/30' : 'bg-violet-50 border border-violet-200'}`}>
+                          <div className="text-2xl mb-2">🧠</div>
+                          <div className="font-semibold text-violet-400 mb-1">Tâches "Cerveau"</div>
+                          <div className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Besoin d'IA : analyse de texte, résumé, tri d'emails, rédaction personnalisée</div>
+                        </div>
+                        <div className={`p-4 rounded-xl ${darkMode ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-amber-50 border border-amber-200'}`}>
+                          <div className="text-2xl mb-2">🤝</div>
+                          <div className="font-semibold text-amber-400 mb-1">Tâches "Humaines"</div>
+                          <div className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>Valeur ajoutée : négociation, RDV stratégique, création pure, empathie</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 4 - Friction */}
+                <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center text-white font-bold shadow-lg">4</div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-2">Identifier les "Points de Friction"</h3>
+                      <p className={`mb-3 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Pour chaque processus que vous listez, attribuez une note de <strong>"Pénibilité"</strong> de 1 à 5.
+                      </p>
+                      <div className={`p-4 rounded-xl ${darkMode ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-amber-50 border border-amber-200'}`}>
+                        <p className={`text-sm ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                          <strong>💡 Astuce :</strong> On commence souvent par automatiser ce qui vous "coûte" le plus d'énergie mentale, même si c'est une petite tâche. 
+                          C'est là que le <strong>ROI (Retour sur Investissement)</strong> est le plus immédiat.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 5 - Agents */}
+                <div className={`p-5 rounded-2xl ${darkMode ? 'bg-slate-800/50' : 'bg-slate-100/50'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center text-white font-bold shadow-lg">5</div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-2">Préparer le "Squelette" de vos futurs Agents</h3>
+                      <p className={`mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Pour chaque tâche identifiée comme <span className="text-violet-400 font-medium">"Cerveau"</span> (violet), commencez à noter :
+                      </p>
+                      <div className="space-y-3">
+                        <div className={`flex items-center gap-3 p-3 rounded-lg ${darkMode ? 'bg-slate-900/50' : 'bg-white/50'}`}>
+                          <span className="text-xl">🎭</span>
+                          <div>
+                            <div className="font-medium">Le Contexte</div>
+                            <div className={`text-sm ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>"Tu es mon assistant administratif expert en fiscalité..."</div>
+                          </div>
+                        </div>
+                        <div className={`flex items-center gap-3 p-3 rounded-lg ${darkMode ? 'bg-slate-900/50' : 'bg-white/50'}`}>
+                          <span className="text-xl">📚</span>
+                          <div>
+                            <div className="font-medium">Les Sources</div>
+                            <div className={`text-sm ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>"Pour répondre, tu dois regarder dans ce fichier Excel et ce PDF..."</div>
+                          </div>
+                        </div>
+                        <div className={`flex items-center gap-3 p-3 rounded-lg ${darkMode ? 'bg-slate-900/50' : 'bg-white/50'}`}>
+                          <span className="text-xl">🎤</span>
+                          <div>
+                            <div className="font-medium">Le Ton</div>
+                            <div className={`text-sm ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>"Réponds toujours de manière formelle mais concise..."</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </section>
+
+          <footer className={`relative z-10 mt-12 border-t ${darkMode ? 'border-slate-800/50' : 'border-slate-200/50'}`}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                <div className={`text-sm ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>© 2025 Audit Flow-IA</div>
+                <div className={`text-xs ${darkMode ? 'text-slate-600' : 'text-slate-400'}`}>{tasks.length} tâche{tasks.length > 1 ? 's' : ''} · {stats.automatizableHours}h automatisables</div>
+              </div>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
